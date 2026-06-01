@@ -1,0 +1,221 @@
+#include <SDL.h>
+#include <SDL_ttf.h>
+#include <stdio.h>
+#include <string.h>
+#include <windows.h> // 선택 2: 컴퓨터 비프음(효과음)을 쓰기 위해 필요합니다
+
+#define MAX_TANKS 3 // 어항의 총 개수
+
+// 어항의 정보를 담는 구조체 정의
+struct FishTank {
+    int fishType;    // 0: Normal Fish, 1: Fast Fish, 2: Big Fish
+    float growth;    // 물고기 성장도 (%)
+    float water;     // 어항의 남은 물 수치 (%)
+    bool isAlive;    // 물고기가 살아있는지 여부
+    bool playedDeadSound; // 죽었을 때 소리가 한 번만 나도록 체크하는 변수
+};
+
+// 게임에 필요한 전역 변수들
+FishTank tanks[MAX_TANKS];
+SDL_Window* window = NULL;
+SDL_Renderer* renderer = NULL;
+TTF_Font* font = NULL;
+bool g_backGroundLoop = true;
+
+// 1. 게임 초기화 함수
+void initGame() {
+    for (int i = 0; i < MAX_TANKS; i++) {
+        tanks[i].fishType = i; // 0: Normal, 1: Fast, 2: Big
+        tanks[i].growth = 0.0f;
+        tanks[i].water = 100.0f;
+        tanks[i].isAlive = true;
+        tanks[i].playedDeadSound = false;
+    }
+}
+
+// 2. 게임 상태 업데이트 함수 (시간 흐름 계산)
+void updateGame() {
+    for (int i = 0; i < MAX_TANKS; i++) {
+        if (!tanks[i].isAlive) {
+            //물고기가 죽는 순간에 딱 한 번만 효과음 내기
+            if (!tanks[i].playedDeadSound) {
+                Beep(200, 500); // 200Hz의 낮은 음으로 0.5초간 우우웅~ 소리 내기
+                tanks[i].playedDeadSound = true;
+            }
+            continue;
+        }
+
+        //물고기 종류에 따른 물 소비량 차이
+        float waterDecreaseSpeed = 0.05f;
+        if (tanks[i].fishType == 2) {
+            waterDecreaseSpeed = 0.15f;   // Big Fish는 물을 3배로 많이 마심!
+        }
+        tanks[i].water -= waterDecreaseSpeed;
+
+        // 물이 다 떨어지면 사망
+        if (tanks[i].water <= 0) {
+            tanks[i].water = 0;
+            tanks[i].isAlive = false;
+            printf("%d번 어항의 물고기가 사망했습니다...\n", i + 1);
+        }
+
+        // 물고기 성장 계산
+        if (tanks[i].isAlive) {
+            float growthSpeed = 0.03f;
+            if (tanks[i].fishType == 1) {
+                growthSpeed = 0.08f;   // Fast Fish는 훨씬 빠르게 자람!
+            }
+            tanks[i].growth += growthSpeed;
+            if (tanks[i].growth >= 100.0f) tanks[i].growth = 100.0f;
+        }
+    }
+}
+
+// 글씨 출력을 편하게 해주는 함수
+void drawText(const char* text, int x, int y, SDL_Color color) {
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text, color);
+    if (!surface) return;
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Rect dstRect = { x, y, surface->w, surface->h };
+    SDL_RenderCopy(renderer, texture, NULL, &dstRect);
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
+// 3. 게임 화면 그리기 함수 (그래픽 출력)
+void renderGame() {
+    // 배경을 진한 바다색으로 칠하기
+    SDL_SetRenderDrawColor(renderer, 20, 40, 80, 255);
+    SDL_RenderClear(renderer);
+
+    SDL_Color whiteColor = { 255, 255, 255, 255 };
+    SDL_Color blueColor = { 100, 200, 255, 255 };
+    SDL_Color redColor = { 255, 100, 100, 255 };
+
+    drawText("=== SDL Fish Tank Game (With Option Functions) ===", 80, 20, whiteColor);
+    drawText("Press 1, 2, 3 to Give Water!", 190, 50, whiteColor);
+
+    // 어항 3개 그리기
+    for (int i = 0; i < MAX_TANKS; i++) {
+        int startX = 40 + (i * 200);
+        int startY = 120;
+
+        // 어항 테두리 그리기
+        SDL_Rect tankRect = { startX, startY, 160, 250 };
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderDrawRect(renderer, &tankRect);
+
+        // 어항 번호와 물고기 종류 이름 출력
+        char tankNumStr[32];
+        sprintf_s(tankNumStr, "Tank %d", i + 1);
+        drawText(tankNumStr, startX + 45, startY + 10, whiteColor);
+
+        const char* fishName = "Normal Fish";
+        if (tanks[i].fishType == 1) fishName = "Fast Fish";
+        if (tanks[i].fishType == 2) fishName = "Big Fish";
+        drawText(fishName, startX + 15, startY + 40, blueColor);
+
+        // [선택 1] 물고기 상태에 따른 이미지(도형) 변경 구현 부분!
+        int fishX = startX + 60;
+        int fishY = startY + 100;
+
+        if (tanks[i].isAlive) {
+            if (tanks[i].growth < 50.0f) {
+                // 상태 A: 성장도가 50% 미만일 때는 "귀여운 아기 노란 사각형"
+                SDL_Rect babyFish = { fishX, fishY, 30, 20 };
+                SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255); // 노란색
+                SDL_RenderFillRect(renderer, &babyFish);
+                drawText("[Baby]", startX + 55, startY + 70, whiteColor);
+            }
+            else {
+                // 상태 B: 성장도가 50% 이상일 때는 "커다란 성체 연두색 사각형"
+                SDL_Rect adultFish = { fishX - 10, fishY - 10, 50, 35 };
+                SDL_SetRenderDrawColor(renderer, 0, 255, 100, 255); // 연두색
+                SDL_RenderFillRect(renderer, &adultFish);
+                drawText("[Adult]", startX + 53, startY + 65, whiteColor);
+            }
+
+            // 텍스트 상태 출력
+            char infoStr[64];
+            sprintf_s(infoStr, "Growth: %.1f%%", tanks[i].growth);
+            drawText(infoStr, startX + 15, startY + 160, whiteColor);
+
+            sprintf_s(infoStr, "Water: %.1f%%", tanks[i].water);
+            drawText(infoStr, startX + 15, startY + 190, blueColor);
+        }
+        else {
+            // 상태 C: 물고기가 죽었을 때는 빨간색 X자 모양 그리기
+            SDL_SetRenderDrawColor(renderer, 255, 50, 50, 255);
+            SDL_RenderDrawLine(renderer, fishX, fishY, fishX + 40, fishY + 40);
+            SDL_RenderDrawLine(renderer, fishX + 40, fishY, fishX, fishY + 40);
+
+            drawText("DEAD...", startX + 45, startY + 160, redColor);
+        }
+    }
+
+    SDL_RenderPresent(renderer);
+}
+
+// 4. 키보드 입력 처리 함수 (물 주기 및 효과음)
+void handleInput() {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            g_backGroundLoop = false;
+        }
+        else if (event.type == SDL_KEYDOWN) {
+            switch (event.key.keysym.sym) {
+            case SDLK_ESCAPE:
+                g_backGroundLoop = false;
+                break;
+            case SDLK_1:
+                if (tanks[0].isAlive) {
+                    tanks[0].water = 100.0f;
+                    Beep(800, 100); // 물 줄 때 효과음: 높은 "띡!" 소리 내기
+                }
+                break;
+            case SDLK_2:
+                if (tanks[1].isAlive) {
+                    tanks[1].water = 100.0f;
+                    Beep(800, 100); // 효과음
+                }
+                break;
+            case SDLK_3:
+                if (tanks[2].isAlive) {
+                    tanks[2].water = 100.0f;
+                    Beep(800, 100); // 효과음
+                }
+                break;
+            }
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
+    if (TTF_Init() == -1) { SDL_Quit(); return -1; }
+
+    window = SDL_CreateWindow("Fish Game Full Edition", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_SHOWN);
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+    // 폰트 로드
+    font = TTF_OpenFont("C:\\Windows\\Fonts\\arial.ttf", 14);
+    if (!font) font = TTF_OpenFont("C:\\Windows\\Fonts\\맑은고딕.ttf", 14);
+
+    initGame();
+
+    while (g_backGroundLoop) {
+        handleInput();
+        updateGame();
+        renderGame();
+        SDL_Delay(16);
+    }
+
+    if (font) TTF_CloseFont(font);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    SDL_Quit();
+
+    return 0;
+}
